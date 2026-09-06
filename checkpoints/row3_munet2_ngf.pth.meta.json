@@ -1,0 +1,23 @@
+{
+  "model_type": "munet",
+  "input_keys": [
+    "nacpet",
+    "topogram"
+  ],
+  "in_channels": 2,
+  "base_channels": 32,
+  "bottleneck_dropout": 0.2,
+  "use_attention_skips": true,
+  "encoder_attention": true,
+  "attn_heads": 8,
+  "deep_supervision": true,
+  "patch_size": [
+    208,
+    208,
+    208
+  ],
+  "hu_decode": {
+    "a": 3000,
+    "b": -1000
+  }
+}

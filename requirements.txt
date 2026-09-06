@@ -1,0 +1,20 @@
+# Core — needed for training and inference.
+#
+# torch: install the build that matches YOUR driver first, from pytorch.org, then run
+# `pip install -r requirements.txt`. Pinning a +cuXXX wheel here would break on other
+# machines. The released checkpoints were produced with torch 2.6.0+cu124 on CUDA
+# driver 535; anything from 2.4 onward should load them (they are plain state dicts).
+torch>=2.4
+monai==1.5.2
+nibabel>=5.2
+numpy>=1.26
+PyYAML>=6.0
+tqdm>=4.66
+
+# Optional — L_AnPer only (anper_loss_weight > 0).
+# Also needs the TotalSegmentator task-297 weights on disk; see the README.
+# Set anper_loss_weight: 0.0 in the configs to train without this.
+# nnunetv2>=2.5
+
+# Optional — scripts/register_mri.py only, i.e. reproducing Table 1 rows 3 and 4.
+# antspyx>=0.4

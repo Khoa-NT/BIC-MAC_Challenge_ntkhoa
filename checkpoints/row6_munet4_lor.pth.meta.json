@@ -1,0 +1,25 @@
+{
+  "model_type": "munet",
+  "input_keys": [
+    "nacpet",
+    "topogram",
+    "mri_combined_in_phase",
+    "mri_combined_out_phase"
+  ],
+  "in_channels": 4,
+  "base_channels": 32,
+  "bottleneck_dropout": 0.2,
+  "use_attention_skips": true,
+  "encoder_attention": true,
+  "attn_heads": 8,
+  "deep_supervision": true,
+  "patch_size": [
+    448,
+    448,
+    48
+  ],
+  "hu_decode": {
+    "a": 3000,
+    "b": -1000
+  }
+}

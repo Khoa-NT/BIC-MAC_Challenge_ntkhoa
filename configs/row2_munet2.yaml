@@ -1,0 +1,81 @@
+# =============================================================================
+# Table 1 row 2 -- MuNet_2, the loss alone
+# =============================================================================
+# The single largest step in the paper, and it is a LOSS change only: same
+# backbone and same inputs as row 1, but the error is measured in Carney
+# attenuation space with region weights instead of plain L1 in HU.
+# CT falls 12% and every PET metric improves by a factor of 1.4 to 3.7.
+#
+# Reproduces Table 1 row 2 of the paper:
+#   CT mu-MAE 0.005803   SUV MAE 0.0377   Organ bias 2.74   Brain outlier 0.0148
+#
+#
+# Run:
+#   python src/train.py --config configs/row2_munet2.yaml
+#
+# Expected: ~300 epochs, about 1.8 days on one 48 GB GPU
+# =============================================================================
+
+
+# --- data --------------------------------------------------------------------
+data_dir: ../bic-mac-data/train        # BIC-MAC train/ (75 subjects with ct-label/)
+output_dir: outputs/row2_munet2
+holdout_subjects: []                   # [] = train on all 75 and gate on the
+                                       # leaderboard, which is what the paper did.
+                                       # Name subject ids here for a local split.
+
+# --- input channels ----------------------------------------------------------
+input_keys: [nacpet, topogram]
+in_channels: 2                         # MuNet_2
+
+# --- architecture (MuNet = the organizers' U-Net + the three additions) -------
+base_channels: 32
+bottleneck_dropout: 0.2
+use_attention_skips: true              # attention gates on the skip connections
+encoder_attention: true                # self-attention at the two deepest stages
+attn_heads: 8
+deep_supervision: true                 # auxiliary CT heads at 1/2 and 1/4 scale
+ds_weights: [0.5, 0.25]                # their loss weights, coarser = smaller
+                                       # Set all three false for the plain baseline
+                                       # U-Net (the architecture ablation).
+
+# --- L_mu: region-weighted L1 in Carney attenuation space (always on) --------
+# The weights up-weight what the four scored metrics are sensitive to. They are also
+# what makes from-scratch training work at all: under a plain L1 our from-scratch runs
+# produced ZERO voxels above 300 HU, i.e. the network never learned bone.
+bone_weight: 3.0                       # ground-truth HU > bone_hu
+bone_hu: 300.0
+brain_weight: 3.0                      # brain: the metric we were weakest on
+organ_weight: 2.0                      # 4.0 was tested and made organ bias WORSE
+brain_label: 90
+organ_labels: [1, 5, 7, 51]            # spleen, liver, pancreas, heart — the four
+                                       # the organ-bias metric is computed over
+
+# --- L_grad: edge-strength matching -----------------------------------------
+grad_loss_weight: 0.1
+
+# --- L_AnPer: anatomical perception vs a frozen TotalSegmentator ------------
+# Largest effect on the AC-PET metrics of anything we tried: organ -5.8%,
+# brain -27.4% in a matched pair. Needs TotalSegmentator weights (see README).
+# Set the weight to 0.0 to train without it and skip that dependency.
+anper_loss_weight: 0.1
+anper_model_folder: /path/to/nnunet/results/Dataset297_TotalSegmentator_total_3mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres
+anper_layers: [decoder.stages.0, decoder.stages.1, decoder.stages.2]
+
+# --- schedule ----------------------------------------------------------------
+epochs: 300
+learning_rate: 0.0003
+patch_size: [208, 208, 208]
+train_num_samples: 2
+batch_size: 1
+amp_dtype: float16
+grad_clip: 1.0
+seed: 0
+snapshot_every: 0
+
+# --- dataloader --------------------------------------------------------------
+num_workers: 4
+persistent_workers: true
+pin_memory: false                      # crashes with CUDA workers on some driver
+                                       # and torch combinations; buys little here
+cache_rate: 0.0

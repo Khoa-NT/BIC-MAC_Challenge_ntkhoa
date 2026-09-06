@@ -1,0 +1,121 @@
+# =============================================================================
+# ABLATION — the organizers' U-Net trained with OUR losses
+# =============================================================================
+# The experiment that answers "was it the loss, or was it your architecture?"
+#
+# This is configs/row2_munet2.yaml with the three MuNet additions switched off, and
+# nothing else changed. Compare the two and the difference is the architecture alone;
+# compare this against configs/baseline_unet.yaml and the difference is the loss alone.
+#
+#   baseline_unet.yaml            plain U-Net + plain L1        <- the organizers' recipe
+#   baseline_unet_our_losses.yaml plain U-Net + OUR losses      <- this file
+#   row2_munet2.yaml              MuNet       + OUR losses      <- Table 1 row 2
+#
+# The three additions are 1.4 M parameters, 5.8 % of the model (22.9 M vs 24.3 M).
+#
+# ⚠ WE DID NOT PUBLISH A NUMBER FOR THIS ROW. It is not in the paper, so treat any
+# result you get as your own measurement rather than a reproduction of ours. Do give it
+# the SAME epoch budget as whatever you compare it against, or you will be measuring
+# training length rather than architecture.
+#
+# =============================================================================
+# HOW TO SWITCH INDIVIDUAL LOSS TERMS ON AND OFF
+# =============================================================================
+# Every term is opt-in through its weight, so any subset can be run. Set a weight to
+# 0.0 and the term is skipped entirely — no dependency, no cost.
+#
+#   loss_type: mu_l1        region-weighted L1 in Carney attenuation space (the base
+#                           term; set to `l1` for plain masked L1 in HU space)
+#   grad_loss_weight        L_grad   edge-strength matching
+#   anper_loss_weight       L_AnPer  perceptual loss vs a frozen TotalSegmentator
+#                                    NEEDS nnunetv2 + the task-297 weights
+#   ngf_loss_weight         L_NGF    cross-modal boundary agreement with the DIXON MRI
+#                                    NEEDS scripts/register_mri.py to have been run
+#   lor_loss_weight         L_LOR    line-integral error; also REQUIRES the 448x448x48
+#                                    slab patch, see the note at the bottom
+#
+# What each was worth, measured on MuNet (see the paper for the full table):
+#   L_mu     the largest single step in the project: CT -12%, every PET metric
+#            1.4x to 3.7x better, with the backbone and inputs unchanged
+#   L_AnPer  organ bias -5.8%, brain outlier -27.4% in a matched pair
+#   L_NGF    gives up CT, buys the AC-PET metrics
+#   L_LOR    SUV -11%, organ -15%, brain -54% for +0.4% CT. The ONLY term we found
+#            that improved organ bias at all
+#
+# Run:
+#   python src/train.py --config configs/baseline_unet_our_losses.yaml
+#
+# Expected: 300 epochs, about 1.5 days on one 48 GB GPU
+# =============================================================================
+
+# --- data --------------------------------------------------------------------
+data_dir: ../bic-mac-data/train
+output_dir: outputs/baseline_unet_our_losses
+holdout_subjects: []
+
+# --- input channels ----------------------------------------------------------
+# Matches row2_munet2.yaml so the comparison isolates the architecture. Add the two
+# raw DIXON phases and set in_channels: 4 to compare against row5_munet4.yaml instead.
+input_keys: [nacpet, topogram]
+in_channels: 2
+
+# --- architecture: the organizers' plain U-Net -------------------------------
+base_channels: 32
+bottleneck_dropout: 0.2
+use_attention_skips: false             # <- the ONLY difference from row2_munet2.yaml
+encoder_attention: false               # <-
+deep_supervision: false                # <-  (ds_weights below is then unused)
+
+# --- L_mu: region-weighted L1 in Carney attenuation space --------------------
+loss_type: mu_l1
+bone_weight: 3.0                       # ground-truth HU > bone_hu
+bone_hu: 300.0
+brain_weight: 3.0
+organ_weight: 2.0                      # 4.0 was tested and made organ bias WORSE
+brain_label: 90
+organ_labels: [1, 5, 7, 51]            # spleen, liver, pancreas, heart
+
+# --- L_grad ------------------------------------------------------------------
+grad_loss_weight: 0.1
+
+# --- L_AnPer -----------------------------------------------------------------
+# Set to 0.0 to drop the nnunetv2 + TotalSegmentator dependency.
+anper_loss_weight: 0.1
+anper_model_folder: /path/to/nnunet/results/Dataset297_TotalSegmentator_total_3mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres
+anper_layers: [decoder.stages.0, decoder.stages.1, decoder.stages.2]
+
+# --- L_NGF -------------------------------------------------------------------
+# Off by default so this config runs with no extra preprocessing. To enable, run
+# scripts/register_mri.py first, then set the weight to 0.006.
+ngf_loss_weight: 0.0
+ngf_eps_rel: 0.1
+ngf_smooth: 1.0
+
+# --- L_LOR -------------------------------------------------------------------
+# Off by default. To enable, set the weight to 0.002 AND change patch_size below to
+# [448, 448, 48]: a line integral is meaningless unless the line crosses the whole
+# body, and a 208-voxel patch spans only 316 mm against a 400-500 mm body. train.py
+# warns if you forget.
+lor_loss_weight: 0.0
+lor_n_angles: 4
+lor_fwhm_mm: 4.0
+lor_min_lines: 32
+lor_include_body: true
+
+# --- schedule ----------------------------------------------------------------
+epochs: 300
+learning_rate: 0.0003
+patch_size: [208, 208, 208]
+train_num_samples: 2
+batch_size: 1
+amp_dtype: float16
+grad_clip: 1.0
+seed: 0
+snapshot_every: 0
+ds_weights: [0.5, 0.25]                # unused while deep_supervision is false
+
+# --- dataloader --------------------------------------------------------------
+num_workers: 4
+persistent_workers: true
+pin_memory: false
+cache_rate: 0.0

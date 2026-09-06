@@ -1,0 +1,73 @@
+# =============================================================================
+# BASELINE — the organizers' U-Net with the organizers' loss (Table 1 row 1)
+# =============================================================================
+# The reference point everything else is measured against: a plain residual 3D U-Net
+# reading NAC-PET only, trained with a masked L1 in normalized HU space.
+#
+# THIS CONFIG EXISTS SO THE COMPARISON IS RUNNABLE, not just quotable. Pair it with
+# configs/baseline_unet_our_losses.yaml to separate what the LOSS bought from what the
+# ARCHITECTURE bought — Table 1 cannot do that on its own, because its row 1 -> row 2
+# step changes the loss, the architecture AND the inputs at the same time.
+#
+# Reproduces Table 1 row 1:
+#   CT mu-MAE 0.006610   SUV MAE 0.0586   Organ bias 4.56   Brain outlier 0.0541
+#
+# ⚠ EXPECT IT TO FAIL ON BONE IF YOU TRAIN IT FROM SCRATCH. Row 1's published numbers
+# come from the organizers' released checkpoint, which we do not redistribute. Training
+# this recipe from random initialization is NOT equivalent: without the region weights
+# of L_mu our from-scratch runs produced ZERO voxels above 300 HU — the network never
+# learned bone — and the brain-outlier score collapsed to 0.409, about six times worse.
+# That failure is a finding, not a bug, and it is why bone_weight exists. To see it,
+# train this and check the histogram of predicted HU.
+#
+# Run:
+#   python src/train.py --config configs/baseline_unet.yaml
+#
+# Expected: 300 epochs, about 1 day on one 48 GB GPU (no attention, no teacher)
+# =============================================================================
+
+# --- data --------------------------------------------------------------------
+data_dir: ../bic-mac-data/train        # BIC-MAC train/ (75 subjects with ct-label/)
+output_dir: outputs/baseline_unet
+holdout_subjects: []
+
+# --- input channels ----------------------------------------------------------
+input_keys: [nacpet]
+in_channels: 1                         # NAC-PET only, as the organizers' baseline
+
+# --- architecture: the organizers' plain U-Net -------------------------------
+# All three MuNet additions OFF. With these false, src/munet.py is structurally
+# identical to the organizers' UNet3D: 32/64/128/256 encoder, 512 bottleneck with
+# Dropout3d(0.2), four decoder blocks, 1x1x1 head, residual blocks with InstanceNorm3d
+# and LeakyReLU(0.01).
+base_channels: 32
+bottleneck_dropout: 0.2
+use_attention_skips: false             # 22.9M params here vs 24.3M with all three on,
+encoder_attention: false               # i.e. the additions are 1.4M params = 5.8%
+deep_supervision: false
+
+# --- loss: the organizers' objective -----------------------------------------
+loss_type: l1                          # masked L1 in normalized HU space.
+                                       # Switch to mu_l1 for our region-weighted loss
+                                       # in Carney attenuation space.
+grad_loss_weight: 0.0                  # every one of our terms is off here
+anper_loss_weight: 0.0
+ngf_loss_weight: 0.0
+lor_loss_weight: 0.0
+
+# --- schedule ----------------------------------------------------------------
+epochs: 300
+learning_rate: 0.0003
+patch_size: [208, 208, 208]
+train_num_samples: 2
+batch_size: 1
+amp_dtype: float16
+grad_clip: 1.0
+seed: 0
+snapshot_every: 0
+
+# --- dataloader --------------------------------------------------------------
+num_workers: 4
+persistent_workers: true
+pin_memory: false
+cache_rate: 0.0

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Training artefacts
+outputs/
+*.log
+train_log.csv
+
+# Preprocessing output of scripts/register_mri.py (~75 subjects, several GB)
+mri_reg_ct/
+
+# Predictions
+*.nii.gz
+!checkpoints/*.nii.gz
+
+# ---------------------------------------------------------------------------
+# Model weights.
+#
+# The six checkpoints are ~93 MB each, 558 MB in total. That is under GitHub's
+# 100 MB per-file hard limit, but above the 50 MB warning threshold, and it makes
+# cloning slow for anyone who only wants to read the code.
+#
+# They are therefore NOT committed here; see the README for the download link.
+# To commit them anyway, either delete the two lines below (and expect the size
+# warning), or track them with Git LFS:
+#     git lfs install && git lfs track "checkpoints/*.pth"
+# ---------------------------------------------------------------------------
+checkpoints/*.pth
+!checkpoints/*.meta.json

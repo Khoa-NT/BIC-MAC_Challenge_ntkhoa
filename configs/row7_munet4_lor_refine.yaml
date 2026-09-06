@@ -1,0 +1,109 @@
+# =============================================================================
+# Table 1 row 7 -- row 6 refined   [FUSION MEMBER, weight 0.7]
+# =============================================================================
+# 100 more epochs at a fifth of the learning rate. This left the TRAINING loss
+# where it started (0.0133 vs 0.0132) and still improved SUV by 1.3%, organ by
+# 1.9% and brain by 4.9% -- the clearest evidence in this project that the
+# training loss carries no information about the validation PET metrics.
+#
+# Reproduces Table 1 row 7 of the paper:
+#   CT mu-MAE 0.005710   SUV MAE not scored*   Organ bias not scored*   Brain outlier not scored*
+#
+# STAGE 3 of 3. Warm-starts from row 6.
+#
+# * The challenge's validation phase closed before this model's own full
+#   reconstruction could be uploaded, so only its CT was ever scored. Its
+#   effect on all four metrics is visible in row 9, the submitted fusion.
+#
+# NOT A RESUME -- A WARM RESTART. train.py saves no optimizer or scheduler
+# state, so the cosine schedule restarts from learning_rate and anneals over
+# these 100 epochs. That is exactly what produced the released checkpoint.
+#
+# Run:
+#   python src/train.py --config configs/row7_munet4_lor_refine.yaml
+#
+# Expected: 100 epochs, about 1 day on one 48 GB GPU
+# =============================================================================
+
+
+# --- data --------------------------------------------------------------------
+data_dir: ../bic-mac-data/train        # BIC-MAC train/ (75 subjects with ct-label/)
+output_dir: outputs/row7_munet4_lor_refine
+init_checkpoint: outputs/row6_munet4_lor/checkpoints/last_model.pth
+                                       # weights only -- see train.py
+holdout_subjects: []                   # [] = train on all 75 and gate on the
+                                       # leaderboard, which is what the paper did.
+                                       # Name subject ids here for a local split.
+
+# --- input channels ----------------------------------------------------------
+input_keys: [nacpet, topogram, mri_combined_in_phase, mri_combined_out_phase]
+in_channels: 4                         # MuNet_4 -- the DIXON MRI is fed RAW and
+                                       # UNREGISTERED. Registering it and feeding it in
+                                       # was tested and fails: the operator cannot exist
+                                       # at test time, so the model degrades the longer
+                                       # it trains. See scripts/register_mri.py.
+
+# --- architecture (MuNet = the organizers' U-Net + the three additions) -------
+base_channels: 32
+bottleneck_dropout: 0.2
+use_attention_skips: true              # attention gates on the skip connections
+encoder_attention: true                # self-attention at the two deepest stages
+attn_heads: 8
+deep_supervision: true                 # auxiliary CT heads at 1/2 and 1/4 scale
+ds_weights: [0.5, 0.25]                # their loss weights, coarser = smaller
+                                       # Set all three false for the plain baseline
+                                       # U-Net (the architecture ablation).
+
+# --- L_mu: region-weighted L1 in Carney attenuation space (always on) --------
+# The weights up-weight what the four scored metrics are sensitive to. They are also
+# what makes from-scratch training work at all: under a plain L1 our from-scratch runs
+# produced ZERO voxels above 300 HU, i.e. the network never learned bone.
+bone_weight: 3.0                       # ground-truth HU > bone_hu
+bone_hu: 300.0
+brain_weight: 3.0                      # brain: the metric we were weakest on
+organ_weight: 2.0                      # 4.0 was tested and made organ bias WORSE
+brain_label: 90
+organ_labels: [1, 5, 7, 51]            # spleen, liver, pancreas, heart — the four
+                                       # the organ-bias metric is computed over
+
+# --- L_grad: edge-strength matching -----------------------------------------
+grad_loss_weight: 0.1
+
+# --- L_AnPer: anatomical perception vs a frozen TotalSegmentator ------------
+# Largest effect on the AC-PET metrics of anything we tried: organ -5.8%,
+# brain -27.4% in a matched pair. Needs TotalSegmentator weights (see README).
+# Set the weight to 0.0 to train without it and skip that dependency.
+anper_loss_weight: 0.1
+anper_model_folder: /path/to/nnunet/results/Dataset297_TotalSegmentator_total_3mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres
+anper_layers: [decoder.stages.0, decoder.stages.1, decoder.stages.2]
+
+# --- L_LOR: error of line integrals along lines of response ------------------
+# The only term that ever improved organ bias. Attenuation acts along lines crossing
+# the WHOLE BODY, so no local reweighting can fix a non-local quantity -- which is why
+# raising organ_weight above did nothing and this term exists.
+# NOTE this forces the slab patch below: a line integral is meaningless unless the
+# line crosses the body.
+lor_loss_weight: 0.002
+lor_n_angles: 4                        # transaxial angles over [0, pi)
+lor_fwhm_mm: 4.0                       # matches the blur the reconstruction pipeline
+                                       # applies before its own forward projection
+lor_min_lines: 32                      # ignore regions crossed by too few lines
+lor_include_body: true                 # the body term targets whole-body SUV MAE
+
+# --- schedule ----------------------------------------------------------------
+epochs: 100
+learning_rate: 5e-05
+patch_size: [448, 448, 48]
+train_num_samples: 2
+batch_size: 1
+amp_dtype: float16
+grad_clip: 1.0
+seed: 0
+snapshot_every: 50
+
+# --- dataloader --------------------------------------------------------------
+num_workers: 4
+persistent_workers: true
+pin_memory: false                      # crashes with CUDA workers on some driver
+                                       # and torch combinations; buys little here
+cache_rate: 0.0
